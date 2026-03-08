@@ -1,0 +1,13 @@
+services:
+  ssh-portfolio:
+    build: .
+    ports:
+      - "23234:23234"
+    env_file:
+      - .env
+    volumes:
+      - ssh-keys:/app/.ssh
+    restart: unless-stopped
+
+volumes:
+  ssh-keys:

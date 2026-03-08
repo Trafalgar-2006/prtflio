@@ -1,0 +1,97 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log"
+	"net"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/ssh"
+	"github.com/charmbracelet/wish"
+	"github.com/charmbracelet/wish/activeterm"
+	"github.com/charmbracelet/wish/bubbletea"
+	"github.com/charmbracelet/wish/logging"
+)
+
+func main() {
+	sshEnabled := os.Getenv("SSH_ENABLED")
+	if sshEnabled == "" {
+		sshEnabled = "false"
+	}
+
+	if sshEnabled == "true" {
+		runSSHServer()
+	} else {
+		runLocalTUI()
+	}
+}
+
+func runLocalTUI() {
+	p := tea.NewProgram(
+		NewModel(),
+		tea.WithAltScreen(),
+		tea.WithMouseCellMotion(),
+	)
+	if _, err := p.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runSSHServer() {
+	host := os.Getenv("HOST")
+	if host == "" {
+		host = "0.0.0.0"
+	}
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "23234"
+	}
+
+	s, err := wish.NewServer(
+		wish.WithAddress(net.JoinHostPort(host, port)),
+		wish.WithHostKeyPath(".ssh/id_ed25519"),
+		wish.WithMiddleware(
+			bubbletea.Middleware(teaHandler),
+			activeterm.Middleware(),
+			logging.Middleware(),
+		),
+	)
+	if err != nil {
+		log.Fatalf("Could not create SSH server: %v", err)
+	}
+
+	done := make(chan os.Signal, 1)
+	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+
+	log.Printf("Starting SSH server on %s:%s", host, port)
+	log.Printf("Connect with: ssh localhost -p %s", port)
+
+	go func() {
+		if err := s.ListenAndServe(); err != nil && !errors.Is(err, ssh.ErrServerClosed) {
+			log.Fatalf("SSH server error: %v", err)
+		}
+	}()
+
+	<-done
+	log.Println("Shutting down SSH server...")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := s.Shutdown(ctx); err != nil {
+		log.Fatalf("Could not shutdown server: %v", err)
+	}
+}
+
+func teaHandler(s ssh.Session) (tea.Model, []tea.ProgramOption) {
+	m := NewModel()
+	return m, []tea.ProgramOption{
+		tea.WithAltScreen(),
+		tea.WithMouseCellMotion(),
+	}
+}
