@@ -15,6 +15,7 @@ RUN apk --no-cache add ca-certificates
 WORKDIR /app
 COPY --from=builder /app/ssh-portfolio .
 
+ENV SSH_ENABLED=true
 EXPOSE 23234
 
 CMD ["./ssh-portfolio"]
